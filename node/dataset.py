@@ -11,6 +11,7 @@ import networkx as nx
 from sklearn.preprocessing import MinMaxScaler
 
 from dgl.nn import APPNPConv
+import torch
 
 def preprocess_features(features):
     """Row-normalize feature matrix and convert to tuple representation"""
@@ -54,25 +55,58 @@ def compute_ppr(graph: nx.Graph, alpha=0.2, self_loop=True):
     at = np.matmul(np.matmul(dinv, a), dinv)  # A~ = D^(-1/2) x A^ x D^(-1/2)
     return alpha * inv((np.eye(a.shape[0]) - (1 - alpha) * at))  # a(I_n-(1-a)A~)^-1
 
+def read_real_datasets(datasets):
+    edge_path = "../new_data/{}/out1_graph_edges.txt".format(datasets)
+    node_feature_path = "../new_data/{}/out1_node_feature_label.txt".format(datasets)
+    with open(edge_path) as edge_file:
+        edge_file_lines = edge_file.readlines()
+        G = nx.parse_edgelist(edge_file_lines[1:], nodetype=int)
+        # g = dgl.from_networkx(G)
+        A = nx.adjacency_matrix(G)
+    with open(node_feature_path) as node_feature_file:
+        node_lines = node_feature_file.readlines()[1:]
+        feature_list = []
+        labels = []
+        max_len = 0
+        for node_line in node_lines:
+            node_id, feature, label = node_line.split("\t")
+            labels.append(int(label))
+            features = feature.split(",")
+            max_len = max(len(features), max_len)
+            feature_list.append([float(feature) for feature in features])
+        feature_pad_list = []
+        for features in feature_list:
+            features += [0] * (max_len - len(features))
+            feature_pad_list.append(features)
+        feature_array = np.array(feature_pad_list)
+        features = torch.from_numpy(feature_array).float()
+        # features = sp.csr_matrix(features)
+        # g.ndata['attr'] = features.float()
+        labels = np.array(labels)
+        labels = torch.FloatTensor(labels).long()
+    return dgl.from_networkx(G), features, labels
 
 def process_dataset(name, epsilon):
     if name == 'cora':
         dataset = CoraGraphDataset()
+        graph = dataset[0]
+        feat = graph.ndata.pop('feat')
+        label = graph.ndata.pop('label')
     elif name == 'citeseer':
         dataset = CiteseerGraphDataset()
+        graph = dataset[0]
+        feat = graph.ndata.pop('feat')
+        label = graph.ndata.pop('label')
+    else:
+        graph, feat, label = read_real_datasets(name)
 
-    graph = dataset[0]
-    feat = graph.ndata.pop('feat')
-    label = graph.ndata.pop('label')
-
-    train_mask = graph.ndata.pop('train_mask')
-    val_mask = graph.ndata.pop('val_mask')
-    test_mask = graph.ndata.pop('test_mask')
-
-    train_idx = th.nonzero(train_mask, as_tuple=False).squeeze()
-    val_idx = th.nonzero(val_mask, as_tuple=False).squeeze()
-    test_idx = th.nonzero(test_mask, as_tuple=False).squeeze()
-
+    # train_mask = graph.ndata.pop('train_mask')
+    # val_mask = graph.ndata.pop('val_mask')
+    # test_mask = graph.ndata.pop('test_mask')
+    #
+    # train_idx = th.nonzero(train_mask, as_tuple=False).squeeze()
+    # val_idx = th.nonzero(val_mask, as_tuple=False).squeeze()
+    # test_idx = th.nonzero(test_mask, as_tuple=False).squeeze()
     nx_g = dgl.to_networkx(graph)
 
     print('computing ppr')
@@ -93,7 +127,7 @@ def process_dataset(name, epsilon):
 
     graph = graph.add_self_loop()
 
-    return graph, diff_graph, feat, label, train_idx, val_idx, test_idx, diff_weight
+    return graph, diff_graph, feat, label, None, None, None, diff_weight
 
 def process_dataset_appnp(epsilon):
     k = 20
